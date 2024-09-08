@@ -33,18 +33,6 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     # Get the current and next states based on the new `get_state` feature engineering
     old_state = get_state(self, old_game_state) if old_game_state else None
     new_state = get_state(self, new_game_state) if new_game_state else None
-    
-    # Check for custom events like revisiting positions and exploring new cells
-    # Commenting out the custom events logic as requested
-    # if new_game_state:
-    #     x, y = new_game_state['self'][3]
-    #     if (x, y) in self.visited_positions:
-    #         events.append('REVISITED_POSITION')  # Custom penalty for revisiting
-    #     else:
-    #         events.append('NEW_CELL_VISITED')  # Reward for new cell exploration
-    #     self.visited_positions.append((x, y))
-    #     if len(self.visited_positions) > 20:  # Keep track of recent positions
-    #         self.visited_positions.pop(0)
 
     # Calculate the reward based on the current game events
     reward = reward_from_events(self, events)
@@ -101,9 +89,6 @@ def reward_from_events(self, events: List[str]) -> int:
         e.COIN_COLLECTED: 5,  # High reward for collecting coins
         e.WAITED: -0.1,  # Penalty for waiting
         e.INVALID_ACTION: -1,  # Penalty for invalid actions
-        # Commented out custom events for now
-        # 'REVISITED_POSITION': -0.5,  # Custom penalty for revisiting the same position
-        # 'NEW_CELL_VISITED': 0.2  # Reward for exploring new cells
     }
 
     # Sum up the rewards based on the events that occurred

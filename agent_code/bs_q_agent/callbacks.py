@@ -18,7 +18,7 @@ def setup(self):
         self.q_table = dict()
         self.alpha = 0.2
         self.gamma = 0.7
-        self.epsilon = 1.0
+        self.epsilon = 0.1
         self.epsilon_decay = 0.999
         self.epsilon_min = 0.01
         self.last_state = None
@@ -33,23 +33,6 @@ def act(self, game_state: dict) -> str:
     Choose an action based on the Q-learning policy (epsilon-greedy).
     """
 
-    # print("GAME STATE - STEP {0}".format(game_state['step']))
-    # print("###FIELD####")
-    # print(game_state['field'])
-    # print(type(game_state['field']))
-
-    # print("###COINS####")
-    # print(game_state['coins'])
-    # print(type(game_state['coins']))
-
-    # print("###BOMBS####")
-    # print(game_state['bombs'])
-    # print(type(game_state['bombs']))
-
-    # print("###OTHERS####")
-    # print(game_state['others'])
-    # print(type(game_state['others']))
-
     # Get the current state (simplified representation with engineered features)
     state = get_state(self, game_state)
     
@@ -57,7 +40,6 @@ def act(self, game_state: dict) -> str:
     if np.random.rand() < self.epsilon:
         self.logger.debug("Choosing action purely at random.")
         action = np.random.choice(ACTIONS)
-        print("RANDOM")
     else:
         # Check if the state exists in the Q-table, if not, initialize it with zeros
         if state not in self.q_table:
@@ -67,6 +49,7 @@ def act(self, game_state: dict) -> str:
         next_step = find_path_to_nearest_coin(self, game_state['field'], game_state['self'][3], game_state['coins'], game_state['bombs'])
         if next_step:
             # Translate the next step into a valid action (UP, DOWN, LEFT, RIGHT)
+            next_step = tuple(next_step)
             agent_x, agent_y = game_state['self'][3]
             if next_step == (agent_x, agent_y - 1):
                 action = 'UP'
@@ -78,11 +61,9 @@ def act(self, game_state: dict) -> str:
                 action = 'RIGHT'
             else:
                 # Fallback to Q-learning action if no valid path is found
-                print("NO VALID PATH")
                 action = ACTIONS[np.argmax(self.q_table[state])]
         else:
             # If no path is found, fallback to the best Q-learning action
-            print("NO PATH")
             action = ACTIONS[np.argmax(self.q_table[state])]
     
     # Save the last state and action for Q-learning updates
@@ -170,6 +151,8 @@ def convert_arena_to_astar_grid(arena, bombs):
         for j in range(0, len(arena[i])):
             if arena[i][j] == 1:
                 grid[i][j] = -2
+            elif arena[i][j] == 0:
+                grid[i][j] = 1
             else:
                 grid[i][j] = int(arena[i][j])
 
@@ -193,7 +176,7 @@ def find_path_to_nearest_coin(self, field, agent_pos, coins, bombs):
 
     # Convert the arena to an A* compatible grid (0 = free, 1 = obstacle)
     grid = convert_arena_to_astar_grid(field, bombs)
-    astar_grid_obj = Grid(matrix=grid, inverse=True)
+    astar_grid_obj = Grid(matrix=grid)
     
     # Find the nearest coin using Manhattan distance as a heuristic
     closest_coins = sorted(coins, key=lambda coin: abs(agent_pos[0] - coin[0]) + abs(agent_pos[1] - coin[1]))
