@@ -1,99 +1,116 @@
 from collections import namedtuple, deque
-
 import pickle
 from typing import List
-
 import events as e
-from .callbacks import state_to_features
+from .callbacks import get_state, ACTIONS
+import numpy as np
 
 # This is only an example!
-Transition = namedtuple('Transition',
-                        ('state', 'action', 'next_state', 'reward'))
+Transition = namedtuple('Transition', ('state', 'action', 'next_state', 'reward'))
 
-# Hyper parameters -- DO modify
-TRANSITION_HISTORY_SIZE = 3  # keep only ... last transitions
-RECORD_ENEMY_TRANSITIONS = 1.0  # record enemy transitions with probability ...
+# Hyper parameters -- Do modify
+TRANSITION_HISTORY_SIZE = 3  # Keep only the last few transitions
 
 # Events
 PLACEHOLDER_EVENT = "PLACEHOLDER"
 
-
 def setup_training(self):
     """
-    Initialise self for training purpose.
-
+    Initialize self for training purposes.
     This is called after `setup` in callbacks.py.
-
-    :param self: This object is passed to all callbacks and you can set arbitrary values.
     """
-    # Example: Setup an array that will note transition tuples
-    # (s, a, r, s')
+    # Store transition tuples (state, action, reward, next_state) for Q-learning updates
     self.transitions = deque(maxlen=TRANSITION_HISTORY_SIZE)
 
 
 def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_state: dict, events: List[str]):
     """
     Called once per step to allow intermediate rewards based on game events.
-
-    When this method is called, self.events will contain a list of all game
-    events relevant to your agent that occurred during the previous step. Consult
-    settings.py to see what events are tracked. You can hand out rewards to your
-    agent based on these events and your knowledge of the (new) game state.
-
-    This is *one* of the places where you could update your agent.
-
-    :param self: This object is passed to all callbacks and you can set arbitrary values.
-    :param old_game_state: The state that was passed to the last call of `act`.
-    :param self_action: The action that you took.
-    :param new_game_state: The state the agent is in now.
-    :param events: The events that occurred when going from  `old_game_state` to `new_game_state`
+    This is where you update your Q-table.
     """
     self.logger.debug(f'Encountered game event(s) {", ".join(map(repr, events))} in step {new_game_state["step"]}')
+    
+    # Get the current and next states based on the new `get_state` feature engineering
+    old_state = get_state(self, old_game_state) if old_game_state else None
+    new_state = get_state(self, new_game_state) if new_game_state else None
+    
+    # Check for custom events like revisiting positions and exploring new cells
+    # Commenting out the custom events logic as requested
+    # if new_game_state:
+    #     x, y = new_game_state['self'][3]
+    #     if (x, y) in self.visited_positions:
+    #         events.append('REVISITED_POSITION')  # Custom penalty for revisiting
+    #     else:
+    #         events.append('NEW_CELL_VISITED')  # Reward for new cell exploration
+    #     self.visited_positions.append((x, y))
+    #     if len(self.visited_positions) > 20:  # Keep track of recent positions
+    #         self.visited_positions.pop(0)
 
-    # Idea: Add your own events to hand out rewards
-    if ...:
-        events.append(PLACEHOLDER_EVENT)
+    # Calculate the reward based on the current game events
+    reward = reward_from_events(self, events)
 
-    # state_to_features is defined in callbacks.py
-    self.transitions.append(Transition(state_to_features(old_game_state), self_action, state_to_features(new_game_state), reward_from_events(self, events)))
+    # Q-learning update: if old_state exists, update Q-table
+    if old_state is not None:
+        if old_state not in self.q_table:
+            self.q_table[old_state] = np.zeros(len(ACTIONS))
+        if new_state is not None and new_state not in self.q_table:
+            self.q_table[new_state] = np.zeros(len(ACTIONS))
+
+        # Get the index of the action taken
+        action_index = ACTIONS.index(self_action)
+        
+        # Bellman update: Q(s, a) ← Q(s, a) + α [r + γ max_a' Q(s', a') − Q(s, a)]
+        best_future_q = np.max(self.q_table[new_state]) if new_state is not None else 0
+        self.q_table[old_state][action_index] = self.q_table[old_state][action_index] + self.alpha * (
+            reward + self.gamma * best_future_q - self.q_table[old_state][action_index]
+        )
+    
+    # Store the transition for future reference
+    self.transitions.append(Transition(old_state, self_action, new_state, reward))
 
 
 def end_of_round(self, last_game_state: dict, last_action: str, events: List[str]):
     """
-    Called at the end of each game or when the agent died to hand out final rewards.
+    Called at the end of each game or when the agent dies to hand out final rewards.
     This replaces game_events_occurred in this round.
-
-    This is similar to game_events_occurred. self.events will contain all events that
-    occurred during your agent's final step.
-
-    This is *one* of the places where you could update your agent.
-    This is also a good place to store an agent that you updated.
-
-    :param self: The same object that is passed to all of your callbacks.
     """
     self.logger.debug(f'Encountered event(s) {", ".join(map(repr, events))} in final step')
-    self.transitions.append(Transition(state_to_features(last_game_state), last_action, None, reward_from_events(self, events)))
 
-    # Store the model
+    # Get the final state and reward
+    final_state = get_state(self, last_game_state) if last_game_state else None
+    reward = reward_from_events(self, events)
+
+    # Q-learning update for the last action
+    if final_state is not None:
+        if final_state not in self.q_table:
+            self.q_table[final_state] = np.zeros(len(ACTIONS))
+        
+        action_index = ACTIONS.index(last_action)
+        self.q_table[final_state][action_index] += self.alpha * (reward - self.q_table[final_state][action_index])
+
+    # Save the model (Q-table) at the end of the round
     with open("my-saved-model.pt", "wb") as file:
-        pickle.dump(self.model, file)
+        pickle.dump(self.q_table, file)
 
 
 def reward_from_events(self, events: List[str]) -> int:
     """
-    *This is not a required function, but an idea to structure your code.*
-
-    Here you can modify the rewards your agent get so as to en/discourage
-    certain behavior.
+    Modify the rewards to encourage/discourage certain behaviors.
     """
     game_rewards = {
-        e.COIN_COLLECTED: 1,
-        e.KILLED_OPPONENT: 5,
-        PLACEHOLDER_EVENT: -.1  # idea: the custom event is bad
+        e.COIN_COLLECTED: 5,  # High reward for collecting coins
+        e.WAITED: -0.1,  # Penalty for waiting
+        e.INVALID_ACTION: -1,  # Penalty for invalid actions
+        # Commented out custom events for now
+        # 'REVISITED_POSITION': -0.5,  # Custom penalty for revisiting the same position
+        # 'NEW_CELL_VISITED': 0.2  # Reward for exploring new cells
     }
+
+    # Sum up the rewards based on the events that occurred
     reward_sum = 0
     for event in events:
         if event in game_rewards:
             reward_sum += game_rewards[event]
+    
     self.logger.info(f"Awarded {reward_sum} for events {', '.join(events)}")
     return reward_sum
