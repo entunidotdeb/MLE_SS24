@@ -2,7 +2,7 @@ from collections import namedtuple, deque
 import pickle
 from typing import List
 import events as e
-from .callbacks import get_state, ACTIONS
+from .callbacks import ACTIONS
 import numpy as np
 
 # This is only an example!
@@ -31,8 +31,8 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     self.logger.debug(f'Encountered game event(s) {", ".join(map(repr, events))} in step {new_game_state["step"]}')
     
     # Get the current and next states based on the new `get_state` feature engineering
-    old_state = get_state(self, old_game_state) if old_game_state else None
-    new_state = get_state(self, new_game_state) if new_game_state else None
+    old_state = None
+    new_state = None
 
     # Calculate the reward based on the current game events
     reward = reward_from_events(self, events)
@@ -65,7 +65,7 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     self.logger.debug(f'Encountered event(s) {", ".join(map(repr, events))} in final step')
 
     # Get the final state and reward
-    final_state = get_state(self, last_game_state) if last_game_state else None
+    final_state = None
     reward = reward_from_events(self, events)
 
     # Q-learning update for the last action

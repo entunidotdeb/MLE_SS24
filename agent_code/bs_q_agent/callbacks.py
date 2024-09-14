@@ -28,13 +28,56 @@ def setup(self):
         with open("my-saved-model.pt", "rb") as file:
             self.q_table = pickle.load(file)
 
+
+def get_safe_node_options(start_pos, grid):
+    options = []
+    x, y = start_pos
+    for val in [-1, 1]:
+        if 0 < x + val < len(grid) - 1 and grid[x+val][y] > 0:
+            options.append((x+val, y))
+        if 0 < y + val < len(grid) - 1 and grid[x][y + val] > 0:
+            options.append((x, y+val))
+    return options
+    
+
+
 def act(self, game_state: dict) -> str:
     """
     Choose an action based on the Q-learning policy (epsilon-greedy).
     """
 
-    # Get the current state (simplified representation with engineered features)
-    state = get_state(self, game_state)
+    # 0 - COIN
+    # 1 - AGENT_IN_DANGER
+    # 2 - AGENT_IN_DANGER_PREFERRED_COIN
+    # 3 - SAFE - NO COIN - NO DANGER
+    INFO = None
+
+    path, closest_coin, dist_to_closest_coint = None, None, None
+    direction_feature = None
+    state = None
+    best_safe_option = None
+
+    agent_x, agent_y = game_state['self'][3]
+
+    new_transformed_grid = convert_arena_to_astar_grid(game_state['field'], game_state['bombs'], game_state['self'][3], game_state['explosion_map'])
+
+    # check if agent is in danger zone
+    if new_transformed_grid[agent_x][agent_y] == -4:
+        state, path = get_danger_state_feature(self, agent_x, agent_y, new_transformed_grid, game_state['coins'], game_state['bombs'])
+    elif game_state['coins']:
+        closest_coin_sorted_array = get_closest_coin_from(agent_x, agent_y, game_state['coins'])
+        if closest_coin_sorted_array:
+            closest_coin, dist_to_closest_coint = closest_coin_sorted_array[0]
+        if game_state['coins']:
+            path = find_path_to_nearest_coin(self, new_transformed_grid, game_state['self'][3], closest_coin)
+        if path:
+            direction_feature = get_direction(agent_x, agent_y, path)
+        if closest_coin:
+            state = (agent_x, agent_y, 0, closest_coin[0], closest_coin[1], direction_feature, dist_to_closest_coint)
+    else:
+        path = (agent_x, agent_y)
+        direction_feature = get_direction(agent_x, agent_y, path)
+        state = (agent_x, agent_y, 3, agent_x, agent_y, direction_feature, dist_to_closest_coint)
     
     # Epsilon-greedy action selection (explore with probability epsilon)
     if np.random.rand() < self.epsilon:
@@ -45,13 +88,13 @@ def act(self, game_state: dict) -> str:
         if state not in self.q_table:
             self.q_table[state] = np.zeros(len(ACTIONS))
         
-        # Exploit: Use A* pathfinding to suggest the next move toward the nearest coin
-        next_step = find_path_to_nearest_coin(self, game_state['field'], game_state['self'][3], game_state['coins'], game_state['bombs'])
-        if next_step:
+        if path:
             # Translate the next step into a valid action (UP, DOWN, LEFT, RIGHT)
-            next_step = tuple(next_step)
+            next_step = tuple(path)
             agent_x, agent_y = game_state['self'][3]
-            if next_step == (agent_x, agent_y - 1):
+            if next_step == (agent_x, agent_y):
+                action = 'WAIT'
+            elif next_step == (agent_x, agent_y - 1):
                 action = 'UP'
             elif next_step == (agent_x, agent_y + 1):
                 action = 'DOWN'
@@ -73,75 +116,68 @@ def act(self, game_state: dict) -> str:
     print("ACTION {}".format(action))
     return action
 
-def get_state(self, game_state):
-    """
-    Converts the game state to a feature vector with engineered features.
-    Features:
-    1. Agent's (x, y) position
-    2. Shortest path to the nearest coin using A* (if available)
-    3. Whether a coin is nearby (within a radius of 2)
-    """
+def get_danger_state_feature(self, agent_x, agent_y, new_transformed_grid, coins, bombs):
+    state_feature = None
+    path = None
+    safe_options = []
     
-    # Agent's position
+    safe_options_sorted_with_coins = []
+    safe_options_with_closest = []
+    best_safe_option_xy = None
+    best_safe_option_closest_coin = None
+    best_safe_option_closest_coin_distance = None
 
-    agent_x, agent_y = game_state['self'][3]
+    danger_bomb, timer = find_danger_causing_bomb(agent_x, agent_y, bombs, new_transformed_grid)
+    safe_options = get_safe_node_options((agent_x, agent_y), new_transformed_grid)
+    if not safe_options and danger_bomb:
+        pts = [(agent_x + 1, agent_y), (agent_x, agent_y + 1), (agent_x - 1, agent_y), (agent_x, agent_y - 1)]
+        filtered_pts = []
+        for pt in pts:
+            pt_x, pt_y = pt
+            if new_transformed_grid[pt_x][pt_y] in [-4, 1]:
+                filtered_pts.append(pt)
+        filtered_pts = sorted(filtered_pts, key=lambda x: manhattan_distance(danger_bomb, x), reverse=True)
+        if filtered_pts:
+            safe_options.append(filtered_pts[0])
+
+    if not safe_options:
+        direction = get_direction(agent_x, agent_y, (agent_x, agent_y))
+        state = (agent_x, agent_y, 1, danger_bomb[0], danger_bomb[1], direction, timer)
+        path = (agent_x, agent_y)
+        return state, path
     
-    # Coin positions as a list of tuples
-    coins = [(int(coin[0]), int(coin[1])) for coin in game_state['coins']]
-    
-    # Feature 2: Find the path to the nearest coin using A*
+    best_safe_option_xy = safe_options[0]
+
     if coins:
-        path = find_path_to_nearest_coin(self, game_state['field'], (agent_x, agent_y), coins, game_state['bombs'])
-        if path:
-            direction_feature = get_direction(agent_x, agent_y, path)
-        else:
-            direction_feature = -1  # No path found
+        for option in safe_options:
+            option_closest, distance = get_closest_coin_from(option[0], option[1], coins)[0]
+            safe_options_with_closest.append( (option, option_closest, distance) )
+        safe_options_sorted_with_coins = sorted(safe_options_with_closest, key=lambda option: option[2])
+        if safe_options_sorted_with_coins:
+            best_safe_option_xy, best_safe_option_closest_coin, best_safe_option_closest_coin_distance = safe_options_sorted_with_coins[0]
+
+    if best_safe_option_closest_coin and best_safe_option_closest_coin_distance and best_safe_option_xy:
+        coin_x = best_safe_option_xy[0]
+        coin_y = best_safe_option_xy[1]
+        distance_to_coin = best_safe_option_closest_coin_distance
+        direction = get_direction(agent_x, agent_y, best_safe_option_xy)
+        # coin state feature
+        state_feature  = (agent_x, agent_y, 2, coin_x, coin_y, direction, distance_to_coin)
+        path = best_safe_option_xy
     else:
-        direction_feature = -1  # No coins available
+        direction = get_direction(agent_x, agent_y, best_safe_option_xy)
+        # bomb state feature
+        state_feature = (agent_x, agent_y, 1, danger_bomb[0], danger_bomb[1], direction, timer)
+        path = best_safe_option_xy
     
-    # Feature 3: Is a coin nearby (binary feature: 1 if coin within 2 tiles, else 0)
-    coin_nearby_feature = is_coin_nearby((agent_x, agent_y), coins, radius=2)
-
-    # Combine all features into a tuple
-    feature_vector = (int(agent_x), int(agent_y), direction_feature, coin_nearby_feature)
-    
-    return feature_vector
-
-
-
-def state_to_features(game_state: dict) -> np.array:
-    """
-    Converts the game state to the input of your model, i.e. a feature vector.
-    This is not necessary for Task 1 but can be expanded in later tasks.
-    """
-    # This is the dict before the game begins and after it ends
-    if game_state is None:
-        return None
-
-    # For example, you could construct several channels of equal shape, ...
-    channels = []
-    # Append features like walls, coins, bombs, etc. here if needed in future tasks
-    channels.append(...)
-
-    # concatenate them as a feature tensor (they must have the same shape)
-    stacked_channels = np.stack(channels)
-
-    # and return them as a vector
-    return stacked_channels.reshape(-1)
+    return state_feature, path
 
 def save_model(self):
     """Saves the trained model."""
     with open("my-saved-model.pt", "wb") as file:
         pickle.dump(self.q_table, file)
 
-def is_coin_nearby(agent_pos, coins, radius=2):
-    """Check if there is a coin within a certain radius of the agent."""
-    for coin in coins:
-        if abs(agent_pos[0] - coin[0]) + abs(agent_pos[1] - coin[1]) <= radius:
-            return 1  # Coin nearby
-    return 0  # No coin nearby
-
-def convert_arena_to_astar_grid(arena, bombs):
+def convert_arena_to_astar_grid(arena, bombs, agent, explosion_map):
     """
     """
     grid = [[-1 for cols in rows] for rows in arena]
@@ -149,20 +185,92 @@ def convert_arena_to_astar_grid(arena, bombs):
     # consider crates as walls (or a blocked path) too (as of now)
     for i in range(0, len(arena)):
         for j in range(0, len(arena[i])):
+            # crates
             if arena[i][j] == 1:
                 grid[i][j] = -2
+            # free node
             elif arena[i][j] == 0:
                 grid[i][j] = 1
             else:
+                # Stone Walls
                 grid[i][j] = int(arena[i][j])
+            if explosion_map[i][j] > 0:
+                grid[i][j] = -5
 
-    for (bomb_pos, _) in bombs:
-        grid[bomb_pos[0]][bomb_pos[0]] = -3
+    for (bomb_pos, t_left) in bombs:
+        bomb_x, bomb_y =  bomb_pos
+        grid[bomb_x][bomb_y] = -3
+        
+        radius, counter = 3, 1
+        while (counter <= radius):
+            new_x = bomb_x + counter
+            new_y = bomb_y
+            # check out of bound
+            if 0 < new_x < (len(arena) - 1):
+                # check if the new tile is wall or not, if yes, then break out of loop
+                # not required to further check and update
+                if grid[new_x][new_y] == -1:
+                    break
+                elif 0 < new_x < (len(arena) - 1) and grid[new_x][new_y] > 0:
+                    grid[new_x][new_y] = -4
+            else:
+                break
+            counter+=1
+
+        counter = 1
+        while (counter <= radius):
+            new_x = bomb_x
+            new_y = bomb_y + counter
+            if 0 < new_y < (len(arena) - 1):
+                # check if the new tile is wall or not, if yes, then break out of loop
+                # not required to further check and update
+                if grid[new_x][new_y] == -1:
+                    break
+                elif 0 < new_y < (len(arena) - 1) and grid[new_x][new_y] > 0:
+                    grid[new_x][new_y] = -4
+            else:
+                break
+            counter+=1
+        
+        counter, radius = -1, -3
+        while (radius <= counter):
+            new_x = bomb_x + counter
+            new_y = bomb_y
+            if 0 < new_x < (len(arena) - 1):
+                # check if the new tile is wall or not, if yes, then break out of loop
+                # not required to further check and update
+                if grid[new_x][new_y] == -1:
+                    break
+                elif 0 < new_x < (len(arena) - 1) and grid[new_x][new_y] > 0:
+                    grid[new_x][new_y] = -4
+            else:
+                break
+            counter-=1
+        
+        counter = -1
+        while (radius <= counter):
+            new_x = bomb_x
+            new_y = bomb_y + counter
+            if 0 < new_y < (len(arena) - 1):
+                # check if the new tile is wall or not, if yes, then break out of loop
+                # not required to further check and update
+                if grid[new_x][new_y] == -1:
+                    break
+                elif 0 < new_y < (len(arena) - 1) and grid[new_x][new_y] > 0:
+                    grid[new_x][new_y] = -4
+            else:
+                break
+            counter-=1
+    
+    # -3 BOMBS
+    # -2 CRATES
+    # -1 WALLS
+    # 1 FREE
 
     return grid
 
 
-def find_path_to_nearest_coin(self, field, agent_pos, coins, bombs):
+def find_path_to_nearest_coin(self, field, agent_pos, closest_coin):
     """
     Use A* to find the shortest path to the nearest coin.
     :param game_state: The current game state.
@@ -170,29 +278,29 @@ def find_path_to_nearest_coin(self, field, agent_pos, coins, bombs):
     """
     # Agent's position
     agent_x, agent_y = agent_pos
+    path = None
     
-    if not coins:
-        return None
+    if not closest_coin:
+        return path
 
     # Convert the arena to an A* compatible grid (0 = free, 1 = obstacle)
-    grid = convert_arena_to_astar_grid(field, bombs)
-    astar_grid_obj = Grid(matrix=grid)
-    
-    # Find the nearest coin using Manhattan distance as a heuristic
-    closest_coins = sorted(coins, key=lambda coin: abs(agent_pos[0] - coin[0]) + abs(agent_pos[1] - coin[1]))
+    astar_grid_obj = Grid(matrix=field)
     
     # Use A* to find the shortest path to the nearest coin
     finder = AStarFinder()
     start = astar_grid_obj.node(int(agent_x), int(agent_y))
-    end = astar_grid_obj.node(closest_coins[0][0], closest_coins[0][1])
+    end = astar_grid_obj.node(int(closest_coin[0]), int(closest_coin[1]))
     path, _ = finder.find_path(start, end, astar_grid_obj)
     
     # If a path was found, return the first step toward the coin
     if path:
         if len(path) > 1:
-            return path[1]  # Return the first step in the path
+            # Return the first step in the path
+            return path[1]
         elif len(path) == 1:
-            return path[0] # Return the current pos of agent, it means the agent is already on the coin
+            # Return the current pos of agent, it means the agent is already on the coin
+            return path[0]
+    
     return None
 
 def get_direction(agent_x, agent_y, next_step):
@@ -212,3 +320,87 @@ def get_direction(agent_x, agent_y, next_step):
     elif next_y > agent_y:
         return 3  # DOWN
     return -1  # Invalid
+
+
+def manhattan_distance(a, b):
+    """
+    Finds manhattan distance btw 2 pts
+    """
+    return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+def get_closest_coin_from(x, y, coins):
+    """ 
+    Finds closest coin and its distance from given x,y
+    """ 
+    sorted_coin_distances = []
+    
+    if not coins:
+        return sorted_coin_distances
+    
+    coin_distances_array = [(coin, manhattan_distance((x,y), coin)) for coin in coins]
+    sorted_coin_distances = sorted(coin_distances_array, key=lambda x: x[1])
+
+    return sorted_coin_distances
+
+def find_danger_causing_bomb(agent_x, agent_y, bombs, grid):
+    bomb_closest, timer = None, None
+    
+    counter, radius = 1, 3
+    while(counter <= radius and not bomb_closest):
+        if 0 < agent_x + counter < len(grid) - 1:
+            if (grid[agent_x + counter][agent_y] == -1):
+                break
+            elif (grid[agent_x + counter][agent_y] == -3):
+                bomb_closest = (agent_x + counter, agent_y)
+            else:
+                pass
+        counter+=1
+    
+    counter = 1
+    while(counter <= radius and not bomb_closest):
+        if 0 < agent_y + counter < len(grid) - 1:
+            if (grid[agent_x][agent_y + counter] == -1):
+                break
+            elif (grid[agent_x][agent_y + counter] == -3):
+                bomb_closest = (agent_x, agent_y + counter)
+            else:
+                pass
+        counter+=1
+    
+    counter, radius = -1, -3
+    while(radius <= counter and not bomb_closest):
+        if 0 < agent_x + counter < len(grid) - 1:
+            if (grid[agent_x + counter][agent_y] == -1):
+                break
+            elif (grid[agent_x + counter][agent_y] == -3):
+                bomb_closest = (agent_x + counter, agent_y)
+            else:
+                pass
+        counter-=1
+    
+    counter, radius = -1, -3
+    while(radius <= counter and not bomb_closest):
+        if 0 < agent_y + counter < len(grid) - 1:
+            if (grid[agent_x][agent_y + counter] == -1):
+                break
+            elif (grid[agent_x][agent_y + counter] == -3):
+                bomb_closest = (agent_x, agent_y + counter)
+            else:
+                pass
+        counter-=1
+    
+    if bomb_closest:
+        for bomb in bombs:
+            bomb_pos, t = bomb
+            if bomb_pos == bomb_closest:
+                timer = t
+
+    return (bomb_closest, timer)
+
+
+        
+
+
+
+
+    
