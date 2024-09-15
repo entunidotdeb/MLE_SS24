@@ -2,17 +2,14 @@ from collections import namedtuple, deque
 import pickle
 from typing import List
 import events as e
-from .callbacks import ACTIONS
+from .callbacks import ACTIONS, get_state
 import numpy as np
 
-# This is only an example!
+# Store transitions (state, action, reward, next_state)
 Transition = namedtuple('Transition', ('state', 'action', 'next_state', 'reward'))
 
 # Hyper parameters -- Do modify
 TRANSITION_HISTORY_SIZE = 3  # Keep only the last few transitions
-
-# Events
-PLACEHOLDER_EVENT = "PLACEHOLDER"
 
 def setup_training(self):
     """
@@ -30,9 +27,9 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     """
     self.logger.debug(f'Encountered game event(s) {", ".join(map(repr, events))} in step {new_game_state["step"]}')
     
-    # Get the current and next states based on the new `get_state` feature engineering
-    old_state = None
-    new_state = None
+    # Get the current and next states using `get_state`
+    old_state, _ = get_state(self, old_game_state) if old_game_state else (None, None)
+    new_state, _ = get_state(self, new_game_state) if new_game_state else (None, None)
 
     # Calculate the reward based on the current game events
     reward = reward_from_events(self, events)
@@ -65,7 +62,7 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     self.logger.debug(f'Encountered event(s) {", ".join(map(repr, events))} in final step')
 
     # Get the final state and reward
-    final_state = None
+    final_state, _ = get_state(self, last_game_state) if last_game_state else (None, None)
     reward = reward_from_events(self, events)
 
     # Q-learning update for the last action
@@ -89,6 +86,11 @@ def reward_from_events(self, events: List[str]) -> int:
         e.COIN_COLLECTED: 5,  # High reward for collecting coins
         e.WAITED: -0.1,  # Penalty for waiting
         e.INVALID_ACTION: -1,  # Penalty for invalid actions
+        e.GOT_KILLED: -5,  # Strong penalty for getting killed
+        # e.BOMB_DROPPED: 2,  # Reward for strategic bomb drop (if applicable)
+        # e.CRATE_DESTROYED: 1,  # Reward for destroying crates (if relevant)
+        # e.KILLED_OPPONENT: 10,  # High reward for killing opponents (if applicable)
+        # e.MOVED_INTO_DANGER: -3  # Penalty for moving into a danger zone
     }
 
     # Sum up the rewards based on the events that occurred
