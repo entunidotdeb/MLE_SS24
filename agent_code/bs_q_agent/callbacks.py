@@ -93,7 +93,9 @@ def get_state(self, game_state):
     closest_coin, dist_to_closest_coint, direction_feature = None, None, None
     state, path = None, None
 
-    new_transformed_grid = convert_arena_to_astar_grid(game_state['field'], game_state['bombs'], game_state['self'][3], game_state['explosion_map'])
+    field = game_state['field']
+
+    new_transformed_grid = convert_arena_to_astar_grid(field, game_state['bombs'], game_state['self'][3], game_state['explosion_map'])
     if new_transformed_grid[agent_x][agent_y] == -4:
         state, path = get_danger_state_feature(self, agent_x, agent_y, new_transformed_grid, game_state['coins'], game_state['bombs'])
     elif game_state['coins']:
@@ -217,7 +219,7 @@ def convert_arena_to_astar_grid(arena, bombs, agent, explosion_map):
                 # not required to further check and update
                 if grid[new_x][new_y] == -1:
                     break
-                elif 0 < new_x < (len(arena) - 1) and grid[new_x][new_y] > 0:
+                elif 0 < new_x < (len(arena) - 1) and grid[new_x][new_y] in [1, -2]:
                     grid[new_x][new_y] = -4
             else:
                 break
@@ -232,7 +234,7 @@ def convert_arena_to_astar_grid(arena, bombs, agent, explosion_map):
                 # not required to further check and update
                 if grid[new_x][new_y] == -1:
                     break
-                elif 0 < new_y < (len(arena) - 1) and grid[new_x][new_y] > 0:
+                elif 0 < new_y < (len(arena) - 1) and grid[new_x][new_y] in [1, -2]:
                     grid[new_x][new_y] = -4
             else:
                 break
@@ -247,7 +249,7 @@ def convert_arena_to_astar_grid(arena, bombs, agent, explosion_map):
                 # not required to further check and update
                 if grid[new_x][new_y] == -1:
                     break
-                elif 0 < new_x < (len(arena) - 1) and grid[new_x][new_y] > 0:
+                elif 0 < new_x < (len(arena) - 1) and grid[new_x][new_y] in [1, -2]:
                     grid[new_x][new_y] = -4
             else:
                 break
@@ -262,7 +264,7 @@ def convert_arena_to_astar_grid(arena, bombs, agent, explosion_map):
                 # not required to further check and update
                 if grid[new_x][new_y] == -1:
                     break
-                elif 0 < new_y < (len(arena) - 1) and grid[new_x][new_y] > 0:
+                elif 0 < new_y < (len(arena) - 1) and grid[new_x][new_y] in [1, -2]:
                     grid[new_x][new_y] = -4
             else:
                 break
@@ -289,8 +291,10 @@ def find_path_to_nearest_coin(self, field, agent_pos, closest_coin):
     if not closest_coin:
         return path
 
+    transposed_matrix = np.array(field).T
+
     # Convert the arena to an A* compatible grid (0 = free, 1 = obstacle)
-    astar_grid_obj = Grid(matrix=field)
+    astar_grid_obj = Grid(matrix=transposed_matrix)
     
     # Use A* to find the shortest path to the nearest coin
     finder = AStarFinder()
