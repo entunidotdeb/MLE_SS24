@@ -97,7 +97,7 @@ def get_state(self, game_state):
 
     new_transformed_grid = convert_arena_to_astar_grid(field, game_state['bombs'], game_state['self'][3], game_state['explosion_map'])
     if new_transformed_grid[agent_x][agent_y] == -4:
-        state, path = get_danger_state_feature(self, agent_x, agent_y, new_transformed_grid, game_state['coins'], game_state['bombs'])
+        state, path = get_danger_state_feature(self, (agent_x, agent_y), new_transformed_grid, game_state['coins'], game_state['bombs'], field)
     elif game_state['coins']:
         closest_coin, path, dist_to_closest_coint = get_closest_coin_from(self, agent_x, agent_y, game_state['coins'], new_transformed_grid)
         if path:
@@ -124,25 +124,26 @@ def get_safe_node_options(start_pos, grid):
             options.append((x, y+val))
     return options
 
-def get_danger_state_feature(self, agent_x, agent_y, new_transformed_grid, coins, bombs):
+def get_danger_state_feature(self, agent_pos, new_transformed_grid, coins, bombs, orig_field):
     state_feature = None
     path = None
     safe_options = []
+    agent_x, agent_y = agent_pos
     
     best_safe_option_xy = None
     best_safe_option_closest_coin = None
     best_safe_option_closest_coin_distance = None
 
-    danger_bomb, timer = find_danger_causing_bomb(agent_x, agent_y, bombs, new_transformed_grid)
+    danger_bomb, timer = find_danger_causing_bomb(self, (agent_x, agent_y), bombs, new_transformed_grid)
     safe_options = get_safe_node_options((agent_x, agent_y), new_transformed_grid)
     if not safe_options and danger_bomb:
-        pts = [(agent_x + 1, agent_y), (agent_x, agent_y + 1), (agent_x - 1, agent_y), (agent_x, agent_y - 1)]
+        pts = [(agent_x + 1, agent_y), (agent_x, agent_y + 1), (agent_x - 1, agent_y), (agent_x, agent_y - 1), (agent_x, agent_y)]
         filtered_pts = []
         for pt in pts:
             pt_x, pt_y = pt
             if new_transformed_grid[pt_x][pt_y] in [-4, 1]:
                 filtered_pts.append(pt)
-        filtered_pts = sorted(filtered_pts, key=lambda x: manhattan_distance(danger_bomb, x), reverse=True)
+        filtered_pts = sorted(filtered_pts, key=lambda x: len(find_path_to_nearest_coin(self, orig_field, pt, danger_bomb)), reverse=True)
         if filtered_pts:
             safe_options.append(filtered_pts[0])
 
@@ -339,67 +340,27 @@ def get_closest_coin_from(self, x, y, coins, grid):
         return None, None, None
 
     for coin in coins:
-        path_to_coin = find_path_to_nearest_coin(self, grid, (x, y), coin)
-        if path_to_coin and len(path_to_coin) < closest_distance:
-            closest_distance = len(path_to_coin)
-            closest_coin = coin
-            closest_path = path_to_coin
+        if grid[coin[0]][coin[1]] not in [-4, -5]:
+            path_to_coin = find_path_to_nearest_coin(self, grid, (x, y), coin)
+            if path_to_coin and len(path_to_coin) < closest_distance:
+                closest_distance = len(path_to_coin)
+                closest_coin = coin
+                closest_path = path_to_coin
 
     return closest_coin, closest_path, closest_distance
 
-def find_danger_causing_bomb(agent_x, agent_y, bombs, grid):
+def find_danger_causing_bomb(self, agent_pos, bombs, grid):
     bomb_closest, timer = None, None
+    max_distance = len(grid) * len(grid)
     
-    counter, radius = 1, 3
-    while(counter <= radius and not bomb_closest):
-        if 0 < agent_x + counter < len(grid) - 1:
-            if (grid[agent_x + counter][agent_y] == -1):
-                break
-            elif (grid[agent_x + counter][agent_y] == -3):
-                bomb_closest = (agent_x + counter, agent_y)
-            else:
-                pass
-        counter+=1
+    for bomb in bombs:
+        bomb_pos, t = bomb
+        path = find_path_to_nearest_coin(self, grid, agent_pos, bomb_pos)
+        if len(path) < max_distance:
+            max_distance = len(path)
+            bomb_closest = bomb_pos
+            timer = t
     
-    counter = 1
-    while(counter <= radius and not bomb_closest):
-        if 0 < agent_y + counter < len(grid) - 1:
-            if (grid[agent_x][agent_y + counter] == -1):
-                break
-            elif (grid[agent_x][agent_y + counter] == -3):
-                bomb_closest = (agent_x, agent_y + counter)
-            else:
-                pass
-        counter+=1
-    
-    counter, radius = -1, -3
-    while(radius <= counter and not bomb_closest):
-        if 0 < agent_x + counter < len(grid) - 1:
-            if (grid[agent_x + counter][agent_y] == -1):
-                break
-            elif (grid[agent_x + counter][agent_y] == -3):
-                bomb_closest = (agent_x + counter, agent_y)
-            else:
-                pass
-        counter-=1
-    
-    counter, radius = -1, -3
-    while(radius <= counter and not bomb_closest):
-        if 0 < agent_y + counter < len(grid) - 1:
-            if (grid[agent_x][agent_y + counter] == -1):
-                break
-            elif (grid[agent_x][agent_y + counter] == -3):
-                bomb_closest = (agent_x, agent_y + counter)
-            else:
-                pass
-        counter-=1
-    
-    if bomb_closest:
-        for bomb in bombs:
-            bomb_pos, t = bomb
-            if bomb_pos == bomb_closest:
-                timer = t
-
     return (bomb_closest, timer)
 
 
