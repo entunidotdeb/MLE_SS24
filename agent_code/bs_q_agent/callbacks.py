@@ -92,7 +92,7 @@ def get_state(self, game_state):
     closest_coin, dist_to_closest_coint, direction_feature = None, None, None
     state, path = None, None
 
-    field = game_state['field']
+    field = game_state['field'].tolist()
 
     new_transformed_grid = convert_arena_to_astar_grid(field, game_state['bombs'], game_state['explosion_map'])
 
@@ -147,13 +147,25 @@ def get_safe_all_node_options(self, agent_pos, orig_grid, transformed_grid, bomb
 
     for pt in pts:
         pt_x, pt_y = pt
-        if transformed_grid[pt_x][pt_y] == -4:
+        if transformed_grid[pt_x][pt_y] == -4 and orig_grid[pt_x][pt_y] == 0:
             filtered_pts.append(pt)
 
     all_safe_options = sorted(filtered_pts, key=lambda x: len(find_path_to_nearest_coin(self, orig_grid, x, bomb)), reverse=True)
     
     return all_safe_options
 
+
+def convert_original(field):
+    new_field = [[-1 for col in rows] for rows in field]
+    for i in range(len(field)):
+        for j in range(len(field[i])):
+            if field[i][j] == 0:
+                new_field[i][j] = 1
+            elif field[i][j] == 1:
+                new_field[i][j] = -2
+            else:
+                new_field[i][j] = field[i][j]
+    return new_field
 
 def get_danger_state_feature(self, agent_pos, new_transformed_grid, coins, bombs, orig_field):
     state_feature = None
@@ -165,7 +177,8 @@ def get_danger_state_feature(self, agent_pos, new_transformed_grid, coins, bombs
     best_safe_option_closest_coin = None
     best_safe_option_closest_coin_distance = None
 
-    danger_bomb, timer = find_danger_causing_bomb(self, (agent_x, agent_y), bombs, new_transformed_grid)
+    converted_orig_grid = convert_original(orig_field)
+    danger_bomb, timer = find_danger_causing_bomb(self, (agent_x, agent_y), bombs, converted_orig_grid)
     safe_options = get_safe_all_node_options(self, agent_pos, orig_field, new_transformed_grid, danger_bomb)
 
     if not safe_options:
@@ -369,7 +382,7 @@ def find_danger_causing_bomb(self, agent_pos, bombs, grid):
     for bomb in bombs:
         bomb_pos, t = bomb
         path = find_path_to_nearest_coin(self, grid, agent_pos, bomb_pos)
-        if len(path) < max_distance:
+        if path and len(path) < max_distance:
             max_distance = len(path)
             bomb_closest = bomb_pos
             timer = t
