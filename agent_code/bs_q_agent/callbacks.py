@@ -23,6 +23,7 @@ def setup(self):
         self.epsilon_min = 0.01
         self.last_state = None
         self.last_action = None
+        self.all_actions = []
     else:
         self.logger.info("Loading model from saved state.")
         with open("my-saved-model.pt", "rb") as file:
@@ -80,6 +81,7 @@ def act(self, game_state: dict) -> str:
     # Save the last state and action for Q-learning updates
     self.last_state = state
     self.last_action = action
+    self.all_actions.append(action)
     
     print("ACTION {}".format(action))
     return action
@@ -147,7 +149,7 @@ def get_safe_all_node_options(self, agent_pos, orig_grid, transformed_grid, bomb
 
     for pt in pts:
         pt_x, pt_y = pt
-        if transformed_grid[pt_x][pt_y] == -4 and orig_grid[pt_x][pt_y] == 0:
+        if transformed_grid[pt_x][pt_y] == -4 and orig_grid[pt_x][pt_y] == 1:
             filtered_pts.append(pt)
 
     all_safe_options = sorted(filtered_pts, key=lambda x: len(find_path_to_nearest_coin(self, orig_grid, x, bomb)), reverse=True)
@@ -167,6 +169,35 @@ def convert_original(field):
                 new_field[i][j] = field[i][j]
     return new_field
 
+def get_opposite_action(action):
+    opp_action = 'INVALID'
+    if action == 'UP':
+        opp_action = 'DOWN'
+    elif action == 'DOWN':
+        opp_action = 'UP'
+    elif action == 'LEFT':
+        opp_action = 'RIGHT'
+    elif action == 'RIGHT':
+        opp_action = 'LEFT'
+    else:
+        opp_action = 'INVALID'
+    return opp_action
+
+def get_action_coordinates(agent_pos, action):
+    x, y = agent_pos
+    if action == 'UP':
+        y-=1
+    elif action == 'DOWN':
+        y+=1
+    elif action == 'RIGHT':
+        x+=1
+    elif action == 'LEFT':
+        x-=1
+    else:
+        pass
+    return (x, y)
+
+
 def get_danger_state_feature(self, agent_pos, new_transformed_grid, coins, bombs, orig_field):
     state_feature = None
     path = None
@@ -179,7 +210,12 @@ def get_danger_state_feature(self, agent_pos, new_transformed_grid, coins, bombs
 
     converted_orig_grid = convert_original(orig_field)
     danger_bomb, timer = find_danger_causing_bomb(self, (agent_x, agent_y), bombs, converted_orig_grid)
-    safe_options = get_safe_all_node_options(self, agent_pos, orig_field, new_transformed_grid, danger_bomb)
+    if new_transformed_grid[agent_x][agent_y] == -3 and len(self.all_actions) > 1:
+        action = get_opposite_action(self.all_actions[-2])
+        new_pos = get_action_coordinates(agent_pos, action)
+        safe_options.append(new_pos)
+    else:
+        safe_options = get_safe_all_node_options(self, agent_pos, converted_orig_grid, new_transformed_grid, danger_bomb)
 
     if not safe_options:
         direction = get_direction(agent_x, agent_y, (agent_x, agent_y))
@@ -210,7 +246,10 @@ def get_danger_state_feature(self, agent_pos, new_transformed_grid, coins, bombs
     else:
         direction = get_direction(agent_x, agent_y, best_safe_option_xy)
         # bomb state feature
-        state_feature = (agent_x, agent_y, 1, danger_bomb[0], danger_bomb[1], direction, timer)
+        if danger_bomb:
+            state_feature = (agent_x, agent_y, 1, danger_bomb[0], danger_bomb[1], direction, timer)
+        else:
+            state_feature = (agent_x, agent_y, 1, danger_bomb, danger_bomb, direction, timer)
         path = best_safe_option_xy
     
     return state_feature, path
