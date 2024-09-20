@@ -12,22 +12,14 @@ def setup(self):
     """
     Setup your code. This is called once when loading each agent.
     """
+    self.all_actions = []
     if self.train or not os.path.isfile("my-saved-model.pt"):
         self.logger.info("Setting up model from scratch.")
-        # Initialize the Q-table and learning parameters
-        self.q_table = dict()
-        self.alpha = 0.2
-        self.gamma = 0.7
-        self.epsilon = 0.1
-        self.epsilon_decay = 0.999
-        self.epsilon_min = 0.01
-        self.last_state = None
-        self.last_action = None
-        self.all_actions = []
+        # We don't initialize training parameters here anymore
     else:
         self.logger.info("Loading model from saved state.")
         with open("my-saved-model.pt", "rb") as file:
-            self.q_table = pickle.load(file)    
+            self.q_table = pickle.load(file)
 
 
 def act(self, game_state: dict) -> str:
@@ -41,49 +33,48 @@ def act(self, game_state: dict) -> str:
     # 3 - SAFE - NO COIN - NO DANGER
     # 4 - DROP_BOMB
     # 5 - NAVIGATE_TO_CRATE
-    INFO = None
-
-    path = None
-    direction_feature = None
-    state = None
-
-    agent_x, agent_y = game_state['self'][3]
-
-    state, path = get_state(self, game_state)
+    # Get state and suggested action from your logic
+    self.logger.debug("train val {}".format(self.train))
+    state, suggested_action = get_state(self, game_state)
     
-    # Check if the state exists in the Q-table, if not, initialize it with zeros
+    # Ensure state in Q-table
     if state not in self.q_table:
         self.q_table[state] = np.zeros(len(ACTIONS))
     
-    if state and path:
-        # Translate the next step into a valid action (UP, DOWN, LEFT, RIGHT)
-        next_step = tuple(path)
-        agent_x, agent_y = game_state['self'][3]
-        if next_step == (agent_x, agent_y):
-            action = 'WAIT'
-        elif next_step == (agent_x, agent_y - 1):
-            action = 'UP'
-        elif next_step == (agent_x, agent_y + 1):
-            action = 'DOWN'
-        elif next_step == (agent_x - 1, agent_y):
-            action = 'LEFT'
-        elif next_step == (agent_x + 1, agent_y):
-            action = 'RIGHT'
-        else:
-            # Fallback to Q-learning action if no valid path is found
-            action = ACTIONS[np.argmax(self.q_table[state])]
-    elif state and not path:
-        action = 'BOMB'
+    # Epsilon-greedy policy for action selection
+    if self.train and random.uniform(0, 1) < self.epsilon:
+        # Exploration: choose a random action
+        q_action = np.random.choice(ACTIONS)
     else:
-        # If no path is found, fallback to the best Q-learning action
-        action = ACTIONS[np.argmax(self.q_table[state])]
+        # Exploitation: choose the best action from Q-table
+        q_values = self.q_table[state]
+        max_q = np.max(q_values)
+        # Handle multiple actions with the same max Q-value
+        max_actions = [ACTIONS[i] for i, q in enumerate(q_values) if q == max_q]
+        q_action = random.choice(max_actions)
     
-    # Save the last state and action for Q-learning updates
+    # Decide whether to override Q-learning action with suggested action
+    if state and should_override_q_learning(self, state, q_action, suggested_action, game_state):
+        action = suggested_action
+    else:
+        action = q_action
+    
+    # Save for Q-learning updates
     self.last_state = state
     self.last_action = action
     self.all_actions.append(action)
     
     return action
+
+def should_override_q_learning(self, state, q_action, suggested_action, game_state):
+    # Example condition: Always trust your logic when in immediate danger
+    if state[2] == 1 or state[2] == 2:
+        return True
+    # Example condition: If your logic strongly suggests an action
+    if suggested_action == 'BOMB' and game_state['self'][2]:
+        return True
+    # Default: Do not override
+    return False
 
 
 
@@ -92,6 +83,7 @@ def get_state(self, game_state):
     agent_x, agent_y = game_state['self'][3]
     closest_coin, dist_to_closest_coint, direction_feature = None, None, None
     state, path = None, None
+    action = 'WAIT'
 
     field = game_state['field'].tolist()
 
@@ -117,7 +109,27 @@ def get_state(self, game_state):
         path = (agent_x, agent_y)
         direction_feature = get_direction(agent_x, agent_y, path)
         state = (int(agent_x), int(agent_y), 3, int(agent_x), int(agent_y), direction_feature, dist_to_closest_coint)
-    return state, path
+    
+    if state and path:
+        next_step = tuple(path)
+        if next_step == (agent_x, agent_y):
+            action = 'WAIT'
+        elif next_step == (agent_x, agent_y - 1):
+            action = 'UP'
+        elif next_step == (agent_x, agent_y + 1):
+            action = 'DOWN'
+        elif next_step == (agent_x - 1, agent_y):
+            action = 'LEFT'
+        elif next_step == (agent_x + 1, agent_y):
+            action = 'RIGHT'
+        else:
+            action = 'WAIT'
+    elif state and not path:
+        action = 'BOMB'
+    else:
+        action = 'WAIT'
+
+    return state, action
 
 def get_safe_node_options(start_pos, grid):
     options = []
