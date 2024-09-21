@@ -74,7 +74,7 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     Here we update the Q-table for the last transition and save the model.
     """
     self.logger.debug(f'Encountered event(s) {", ".join(map(repr, events))} in final step')
-    
+
     # Get the state and action from the last step
     state = self.last_state
     action = self.last_action
@@ -127,20 +127,20 @@ def reward_from_events(self, events: List[str]) -> float:
     """
     # Default rewards for events
     game_rewards = {
-        e.MOVED_LEFT: 1,
-        e.MOVED_RIGHT: 1,
-        e.MOVED_UP: 1,
-        e.MOVED_DOWN: 1,
-        e.WAITED: -3,
+        e.MOVED_LEFT: 0,
+        e.MOVED_RIGHT: 0,
+        e.MOVED_UP: 0,
+        e.MOVED_DOWN: 0,
+        e.WAITED: -5,
         e.INVALID_ACTION: -10,
-        e.BOMB_DROPPED: 2,
+        e.BOMB_DROPPED: -1,
         e.CRATE_DESTROYED: 5,
+        e.COIN_FOUND: 7,
         e.COIN_COLLECTED: 10,
         e.KILLED_OPPONENT: 50,
         e.KILLED_SELF: -100,
         e.GOT_KILLED: -50,
-        e.SURVIVED_ROUND: 20,
-        # Add any custom events you have defined
+        e.SURVIVED_ROUND: 20
     }
 
     reward_sum = 0
