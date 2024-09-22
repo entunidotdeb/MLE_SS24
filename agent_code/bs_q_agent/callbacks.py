@@ -46,6 +46,7 @@ def act(self, game_state: dict) -> str:
         q_action = random.choice(max_actions)
     
     if q_action != suggested_action:
+        self.logger.debug("q table suggested action {} IMP".format(q_action))
         action = suggested_action
     else:
         action = q_action
@@ -156,10 +157,9 @@ def get_state(self, game_state):
                 path = path[0]
             else:
                 path = path[1]
-            if closest_coin and dist_to_closest_coint:
-                direction_feature = get_direction(agent_x, agent_y, closest_coin)
-                up, right, down, left = get_adjacent_states(self, (agent_x, agent_y), new_transformed_grid, game_state['coins'])
-                state = (0, direction_feature, dist_to_closest_coint, up, right, down, left)
+            direction_feature = get_direction(agent_x, agent_y, path)
+            up, right, down, left = get_adjacent_states(self, (agent_x, agent_y), new_transformed_grid, game_state['coins'])
+            state = (0, direction_feature, dist_to_closest_coint, up, right, down, left)
         elif game_state['self'][2] and crate_exists(field):
             state, path = get_state_for_bomb_drop(self, (agent_x, agent_y), new_transformed_grid, game_state['coins'])
     elif game_state['self'][2] and crate_exists(field):
@@ -633,10 +633,10 @@ def get_state_for_bomb_drop(self, agent_pos, grid, coins):
         final_path = None
     elif distance_to_crate == 1 and crate_to_go_pos and path_to_crate:
         direction = get_direction(agent_pos[0], agent_pos[1], crate_aimed)
-        state = (2, direction, distance_to_crate, up, right, down, left)
+        state = (5, direction, distance_to_crate, up, right, down, left)
         final_path = None
     elif 1 < distance_to_crate < len(grid) * len(grid) and crate_to_go_pos and path_to_crate:
-        direction = get_direction(agent_pos[0], agent_pos[1], crate_aimed)
+        direction = get_direction(agent_pos[0], agent_pos[1], path_to_crate[1])
         state = (2, direction, distance_to_crate, up, right, down, left)
         final_path = path_to_crate[1]
     else:
