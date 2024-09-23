@@ -13,11 +13,11 @@ def setup(self):
     Setup your code. This is called once when loading each agent.
     """
     self.all_actions = []
-    if self.train or not os.path.isfile("my-saved-model.pt"):
+    if self.train or not os.path.isfile("my-saved-model_3.pt"):
         self.logger.info("Setting up model from scratch.")
     else:
         self.logger.info("Loading model from saved state.")
-        with open("my-saved-model.pt", "rb") as file:
+        with open("my-saved-model_3.pt", "rb") as file:
             self.q_table = pickle.load(file)
 
 
