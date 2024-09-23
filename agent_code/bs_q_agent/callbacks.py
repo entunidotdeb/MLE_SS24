@@ -56,7 +56,7 @@ def act(self, game_state: dict) -> str:
     self.last_action = q_action
     self.all_actions.append(q_action)
     
-    return action
+    return q_action
 
 def should_override_q_learning(self, state, q_action, suggested_action, game_state):
     # Example condition: Always trust your logic when in immediate danger
