@@ -92,7 +92,7 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     update_q_table(self, state, action, next_state, reward, terminal=True)
 
     # Save the Q-table (model)
-    with open("my-saved-model.pt", "wb") as file:
+    with open("my-saved-model_3.pt", "wb") as file:
         pickle.dump(self.q_table, file)
 
 def update_q_table(self, state, action, next_state, reward, terminal=False):
