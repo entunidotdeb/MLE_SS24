@@ -12,22 +12,13 @@ def setup(self):
     """
     Setup your code. This is called once when loading each agent.
     """
+    self.all_actions = []
     if self.train or not os.path.isfile("my-saved-model.pt"):
         self.logger.info("Setting up model from scratch.")
-        # Initialize the Q-table and learning parameters
-        self.q_table = dict()
-        self.alpha = 0.2
-        self.gamma = 0.7
-        self.epsilon = 0.1
-        self.epsilon_decay = 0.999
-        self.epsilon_min = 0.01
-        self.last_state = None
-        self.last_action = None
-        self.all_actions = []
     else:
         self.logger.info("Loading model from saved state.")
         with open("my-saved-model.pt", "rb") as file:
-            self.q_table = pickle.load(file)    
+            self.q_table = pickle.load(file)
 
 
 def act(self, game_state: dict) -> str:
@@ -35,56 +26,73 @@ def act(self, game_state: dict) -> str:
     Choose an action based on the Q-learning policy (epsilon-greedy).
     """
 
-    # 0 - COIN
-    # 1 - AGENT_IN_DANGER
-    # 2 - AGENT_IN_DANGER_PREFERRED_COIN
-    # 3 - SAFE - NO COIN - NO DANGER
-    # 4 - DROP_BOMB
-    # 5 - NAVIGATE_TO_CRATE
-    INFO = None
-
-    path = None
-    direction_feature = None
-    state = None
-
-    agent_x, agent_y = game_state['self'][3]
-
-    state, path = get_state(self, game_state)
+    # Get state and suggested action from your logic
+    state, suggested_action = get_state(self, game_state)
     
-    # Check if the state exists in the Q-table, if not, initialize it with zeros
     if state not in self.q_table:
         self.q_table[state] = np.zeros(len(ACTIONS))
     
-    if state and path:
-        # Translate the next step into a valid action (UP, DOWN, LEFT, RIGHT)
-        next_step = tuple(path)
-        agent_x, agent_y = game_state['self'][3]
-        if next_step == (agent_x, agent_y):
-            action = 'WAIT'
-        elif next_step == (agent_x, agent_y - 1):
-            action = 'UP'
-        elif next_step == (agent_x, agent_y + 1):
-            action = 'DOWN'
-        elif next_step == (agent_x - 1, agent_y):
-            action = 'LEFT'
-        elif next_step == (agent_x + 1, agent_y):
-            action = 'RIGHT'
-        else:
-            # Fallback to Q-learning action if no valid path is found
-            action = ACTIONS[np.argmax(self.q_table[state])]
-    elif state and not path:
-        action = 'BOMB'
+    # Epsilon-greedy policy for action selection
+    if self.train and random.uniform(0, 1) < self.epsilon:
+        # Exploration: choose a random action
+        q_action = np.random.choice(ACTIONS)
     else:
-        # If no path is found, fallback to the best Q-learning action
-        action = ACTIONS[np.argmax(self.q_table[state])]
+        # Exploitation: choose the best action from Q-table
+        q_values = self.q_table[state]
+        max_q = np.max(q_values)
+        # Handle multiple actions with the same max Q-value
+        max_actions = [ACTIONS[i] for i, q in enumerate(q_values) if q == max_q]
+        q_action = random.choice(max_actions)
     
-    # Save the last state and action for Q-learning updates
+    # Save for Q-learning updates
     self.last_state = state
-    self.last_action = action
-    self.all_actions.append(action)
+    self.last_action = q_action
+    self.all_actions.append(q_action)
     
-    return action
+    return q_action
 
+def get_adjacent_states(self, agent_pos, grid, coins):
+    up_val, left_val, down_val, right_val = None, None, None, None
+    agent_x, agent_y = agent_pos
+    up = (agent_x, agent_y - 1)
+    down = (agent_x, agent_y + 1)
+    left = (agent_x - 1, agent_y)
+    right = (agent_x + 1, agent_y)
+
+    up_val = get_adjacent_node_values(self, up, grid, coins)
+    right_val = get_adjacent_node_values(self, right, grid, coins)
+    down_val = get_adjacent_node_values(self, down, grid, coins)
+    left_val = get_adjacent_node_values(self, left, grid, coins)
+
+    return (up_val, right_val, down_val, left_val)
+
+def get_adjacent_node_values(self, pos, grid, coins):
+    val = -1
+    x, y = pos
+    read_val = grid[x][y]
+
+    if read_val == 1:
+        val = 0
+        if (x, y) in coins:
+            val = 8
+    elif read_val == -1:
+        val = 1
+    elif read_val == -2:
+        val = 2
+    elif read_val == -3:
+        val = 3
+    elif read_val == -4:
+        val = 4
+        if (x, y) in coins:
+            val = 5
+    elif read_val == -5:
+        val = 6
+        if (x, y) in coins:
+            val = 7
+    else:
+        val = -1
+    
+    return val
 
 
 def get_state(self, game_state):
@@ -92,6 +100,7 @@ def get_state(self, game_state):
     agent_x, agent_y = game_state['self'][3]
     closest_coin, dist_to_closest_coint, direction_feature = None, None, None
     state, path = None, None
+    action = 'WAIT'
 
     field = game_state['field'].tolist()
 
@@ -107,17 +116,36 @@ def get_state(self, game_state):
             else:
                 path = path[1]
             direction_feature = get_direction(agent_x, agent_y, path)
-            if closest_coin and dist_to_closest_coint and direction_feature:
-                state = (int(agent_x), int(agent_y), 0, int(closest_coin[0]), int(closest_coin[1]), direction_feature, dist_to_closest_coint)
+            up, right, down, left = get_adjacent_states(self, (agent_x, agent_y), new_transformed_grid, game_state['coins'])
+            state = (0, direction_feature, dist_to_closest_coint, up, right, down, left)
         elif game_state['self'][2] and crate_exists(field):
-            state, path = get_state_for_bomb_drop(self, (agent_x, agent_y), new_transformed_grid, field, game_state['bombs'], game_state['explosion_map'])
+            state, path = get_state_for_bomb_drop(self, (agent_x, agent_y), new_transformed_grid, game_state['coins'])
     elif game_state['self'][2] and crate_exists(field):
-        state, path = get_state_for_bomb_drop(self, (agent_x, agent_y), new_transformed_grid, field, game_state['bombs'], game_state['explosion_map'])
+        state, path = get_state_for_bomb_drop(self, (agent_x, agent_y), new_transformed_grid, game_state['coins'])
     else:
+        up, right, down, left = get_adjacent_states(self, (agent_x, agent_y), new_transformed_grid, game_state['coins'])
         path = (agent_x, agent_y)
-        direction_feature = get_direction(agent_x, agent_y, path)
-        state = (int(agent_x), int(agent_y), 3, int(agent_x), int(agent_y), direction_feature, dist_to_closest_coint)
-    return state, path
+        state = (4, 0, 0, up, right, down, left)
+    if state and path:
+        next_step = tuple(path)
+        if next_step == (agent_x, agent_y):
+            action = 'WAIT'
+        elif next_step == (agent_x, agent_y - 1):
+            action = 'UP'
+        elif next_step == (agent_x, agent_y + 1):
+            action = 'DOWN'
+        elif next_step == (agent_x - 1, agent_y):
+            action = 'LEFT'
+        elif next_step == (agent_x + 1, agent_y):
+            action = 'RIGHT'
+        else:
+            action = 'WAIT'
+    elif state and not path:
+        action = 'BOMB'
+    else:
+        action = 'WAIT'
+
+    return state, action
 
 def get_safe_node_options(start_pos, grid):
     options = []
@@ -214,13 +242,14 @@ def get_danger_state_feature(self, agent_pos, new_transformed_grid, coins, bombs
     path = None
     safe_options = []
     agent_x, agent_y = agent_pos
+    up, right, down, left = get_adjacent_states(self, agent_pos, new_transformed_grid, coins)
     
     best_safe_option_xy = None
     best_safe_option_closest_coin = None
     best_safe_option_closest_coin_distance = None
 
     converted_orig_grid = convert_original(orig_field)
-    danger_bomb, timer = find_danger_causing_bomb(self, (agent_x, agent_y), bombs, converted_orig_grid)
+    danger_bomb, distance_to_bomb = find_danger_causing_bomb(self, (agent_x, agent_y), bombs, converted_orig_grid)
     if new_transformed_grid[agent_x][agent_y] == -3 and len(self.all_actions) > 1:
         last_action = get_action_before_last_bomb_dropped(self, self.all_actions)
         action = get_opposite_action(self.all_actions[-2])
@@ -230,10 +259,13 @@ def get_danger_state_feature(self, agent_pos, new_transformed_grid, coins, bombs
         safe_options = get_safe_all_node_options(self, agent_pos, converted_orig_grid, new_transformed_grid, danger_bomb)
 
     if not safe_options:
-        direction = get_direction(agent_x, agent_y, (agent_x, agent_y))
-        state = (int(agent_x), int(agent_y), 1, int(danger_bomb[0]), int(danger_bomb[1]), direction, timer)
+        if danger_bomb and distance_to_bomb:
+            direction = get_direction(agent_x, agent_y, danger_bomb)
+            state_feature = (1, direction, distance_to_bomb, up, right, down, left)
+        else:
+            state_feature = (1, None, None, up, right, down, left)
         path = (agent_x, agent_y)
-        return state, path
+        return state_feature, path
     
     best_safe_option_xy = safe_options[0]
 
@@ -251,17 +283,17 @@ def get_danger_state_feature(self, agent_pos, new_transformed_grid, coins, bombs
         coin_x = best_safe_option_xy[0]
         coin_y = best_safe_option_xy[1]
         distance_to_coin = best_safe_option_closest_coin_distance
-        direction = get_direction(agent_x, agent_y, best_safe_option_xy)
+        direction = get_direction(agent_x, agent_y, best_safe_option_closest_coin)
         # coin state feature
-        state_feature  = (int(agent_x), int(agent_y), 2, int(coin_x), int(coin_y), direction, distance_to_coin)
+        state_feature  = (3, direction, distance_to_coin, up, right, down, left)
         path = best_safe_option_xy
     else:
-        direction = get_direction(agent_x, agent_y, best_safe_option_xy)
         # bomb state feature
         if danger_bomb:
-            state_feature = (int(agent_x), int(agent_y), 1, int(danger_bomb[0]), int(danger_bomb[1]), direction, timer)
+            direction = get_direction(agent_x, agent_y, danger_bomb)
+            state_feature = (1, direction, distance_to_bomb, up, right, down, left)
         else:
-            state_feature = (int(agent_x), int(agent_y), 1, danger_bomb, danger_bomb, direction, timer)
+            state_feature = (1, None, None, up, right, down, left)
         path = best_safe_option_xy
     
     return state_feature, path
@@ -426,18 +458,17 @@ def get_closest_coin_from(self, x, y, coins, grid):
     return (closest_coin, closest_path, closest_distance)
 
 def find_danger_causing_bomb(self, agent_pos, bombs, grid):
-    bomb_closest, timer = None, None
+    bomb_closest = None
     max_distance = len(grid) * len(grid)
     
     for bomb in bombs:
-        bomb_pos, t = bomb
+        bomb_pos, _ = bomb
         path = find_path_to_nearest_coin(self, grid, agent_pos, bomb_pos)
         if path and len(path) < max_distance:
             max_distance = len(path)
             bomb_closest = bomb_pos
-            timer = t
     
-    return (bomb_closest, timer)
+    return (bomb_closest, max_distance)
 
 def crate_exists(field):
     exists = False
@@ -524,7 +555,7 @@ def get_total_impact_count_crates(grid, crate_pos):
     return total_count
 
 
-def get_state_for_bomb_drop(self, agent_pos, grid, orig_grid, bombs, explosion_map):
+def get_state_for_bomb_drop(self, agent_pos, grid, coins):
     distance_to_crate = len(grid) * len(grid)
     crate_to_go_pos = (None, None)
     path_to_crate = []
@@ -532,6 +563,7 @@ def get_state_for_bomb_drop(self, agent_pos, grid, orig_grid, bombs, explosion_m
     state = None
     final_path = None
     crate_aimed = (None, None)
+    up, right, down, left = get_adjacent_states(self, agent_pos, grid, coins)
 
     all_crates = get_crates_from_grid(grid)
 
@@ -558,12 +590,12 @@ def get_state_for_bomb_drop(self, agent_pos, grid, orig_grid, bombs, explosion_m
         state = None
         final_path = None
     elif distance_to_crate == 1 and crate_to_go_pos and path_to_crate:
-        direction = 5
-        state = (int(agent_pos[0]), int(agent_pos[1]), 4, int(crate_aimed[0]), int(crate_aimed[1]), direction, max_crates_in_line)
+        direction = get_direction(agent_pos[0], agent_pos[1], crate_aimed)
+        state = (5, direction, distance_to_crate, up, right, down, left)
         final_path = None
     elif 1 < distance_to_crate < len(grid) * len(grid) and crate_to_go_pos and path_to_crate:
         direction = get_direction(agent_pos[0], agent_pos[1], path_to_crate[1])
-        state = (int(agent_pos[0]), int(agent_pos[1]), 5, crate_aimed[0], crate_aimed[1], direction, max_crates_in_line)
+        state = (2, direction, distance_to_crate, up, right, down, left)
         final_path = path_to_crate[1]
     else:
         state = None

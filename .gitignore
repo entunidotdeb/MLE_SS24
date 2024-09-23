@@ -112,3 +112,6 @@ screenshots/*.webm
 
 replays/
 results/
+
+# IDE
+.vscode/
