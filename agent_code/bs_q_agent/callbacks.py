@@ -15,7 +15,6 @@ def setup(self):
     self.all_actions = []
     if self.train or not os.path.isfile("my-saved-model.pt"):
         self.logger.info("Setting up model from scratch.")
-        # We don't initialize training parameters here anymore
     else:
         self.logger.info("Loading model from saved state.")
         with open("my-saved-model.pt", "rb") as file:
@@ -45,53 +44,12 @@ def act(self, game_state: dict) -> str:
         max_actions = [ACTIONS[i] for i, q in enumerate(q_values) if q == max_q]
         q_action = random.choice(max_actions)
     
-    if q_action != suggested_action:
-        self.logger.debug("q table suggested action {} IMP".format(q_action))
-        action = suggested_action
-    else:
-        action = q_action
-
-    # Decide whether to override Q-learning action with suggested action
-    # if state and should_override_q_learning(self, state, q_action, suggested_action, game_state):
-    #     action = suggested_action
-    # else:
-    #     action = q_action
-    
     # Save for Q-learning updates
     self.last_state = state
-    self.last_action = action
-    self.all_actions.append(action)
+    self.last_action = q_action
+    self.all_actions.append(q_action)
     
-    return action
-
-def should_override_q_learning(self, state, q_action, suggested_action, game_state):
-    # Example condition: Always trust your logic when in immediate danger
-    if state[2] == 1 or state[2] == 2:
-        return True
-    # Example condition: If your logic strongly suggests an action
-    if suggested_action == 'BOMB' and game_state['self'][2]:
-        return True
-    
-    # Out of Bounds check
-    action_x, action_y = get_action_coordinates(game_state['self'][3], q_action)
-    if 0 >= action_x or action_x > len(game_state['field']) - 1:
-        return True
-    
-    if 0 >= action_y or action_y > len(game_state['field']) - 1:
-        return True
-    
-    if int(game_state['field'][action_x][action_y]) != 0:
-        return True
-
-    if int(game_state['explosion_map'][action_x][action_y]) > 0:
-        return True
-
-    for bomb in game_state['bombs']:
-        if game_state['self'][3] == bomb[0]:
-            return True    
-
-    # Default: Do not override
-    return False
+    return q_action
 
 def get_adjacent_states(self, agent_pos, grid, coins):
     up_val, left_val, down_val, right_val = None, None, None, None
