@@ -18,7 +18,7 @@ def setup(self):
         # We don't initialize training parameters here anymore
     else:
         self.logger.info("Loading model from saved state.")
-        with open("my-saved-model.pt", "rb") as file:
+        with open("my-saved-model_3.pt", "rb") as file:
             self.q_table = pickle.load(file)
 
 
@@ -45,16 +45,16 @@ def act(self, game_state: dict) -> str:
         max_actions = [ACTIONS[i] for i, q in enumerate(q_values) if q == max_q]
         q_action = random.choice(max_actions)
     
-    # Decide whether to override Q-learning action with suggested action
-    if state and should_override_q_learning(self, state, q_action, suggested_action, game_state):
-        action = suggested_action
-    else:
-        action = q_action
+    # # Decide whether to override Q-learning action with suggested action
+    # if state and should_override_q_learning(self, state, q_action, suggested_action, game_state):
+    #     action = suggested_action
+    # else:
+    #     action = q_action
     
     # Save for Q-learning updates
     self.last_state = state
-    self.last_action = action
-    self.all_actions.append(action)
+    self.last_action = q_action
+    self.all_actions.append(q_action)
     
     return action
 
