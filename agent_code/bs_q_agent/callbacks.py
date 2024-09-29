@@ -13,8 +13,9 @@ def setup(self):
     Setup your code. This is called once when loading each agent.
     """
     self.all_actions = []
-    if self.train or not os.path.isfile("my-saved-model_3.pt"):
+    if self.train or not os.path.isfile("my-saved-model.pt"):
         self.logger.info("Setting up model from scratch.")
+        # We don't initialize training parameters here anymore
     else:
         self.logger.info("Loading model from saved state.")
         with open("my-saved-model_3.pt", "rb") as file:
@@ -44,12 +45,47 @@ def act(self, game_state: dict) -> str:
         max_actions = [ACTIONS[i] for i, q in enumerate(q_values) if q == max_q]
         q_action = random.choice(max_actions)
     
+    # # Decide whether to override Q-learning action with suggested action
+    # if state and should_override_q_learning(self, state, q_action, suggested_action, game_state):
+    #     action = suggested_action
+    # else:
+    #     action = q_action
+    
     # Save for Q-learning updates
     self.last_state = state
     self.last_action = q_action
     self.all_actions.append(q_action)
     
     return q_action
+
+def should_override_q_learning(self, state, q_action, suggested_action, game_state):
+    # Example condition: Always trust your logic when in immediate danger
+    if state[2] == 1 or state[2] == 2:
+        return True
+    # Example condition: If your logic strongly suggests an action
+    if suggested_action == 'BOMB' and game_state['self'][2]:
+        return True
+    
+    # Out of Bounds check
+    action_x, action_y = get_action_coordinates(game_state['self'][3], q_action)
+    if 0 >= action_x or action_x > len(game_state['field']) - 1:
+        return True
+    
+    if 0 >= action_y or action_y > len(game_state['field']) - 1:
+        return True
+    
+    if int(game_state['field'][action_x][action_y]) != 0:
+        return True
+
+    if int(game_state['explosion_map'][action_x][action_y]) > 0:
+        return True
+
+    for bomb in game_state['bombs']:
+        if game_state['self'][3] == bomb[0]:
+            return True    
+
+    # Default: Do not override
+    return False
 
 def get_adjacent_states(self, agent_pos, grid, coins):
     up_val, left_val, down_val, right_val = None, None, None, None
@@ -116,8 +152,13 @@ def get_state(self, game_state):
             else:
                 path = path[1]
             direction_feature = get_direction(agent_x, agent_y, path)
-            up, right, down, left = get_adjacent_states(self, (agent_x, agent_y), new_transformed_grid, game_state['coins'])
-            state = (0, direction_feature, dist_to_closest_coint, up, right, down, left)
+            if closest_coin and dist_to_closest_coint and direction_feature:
+                up, right, down, left = get_adjacent_states(self, (agent_x, agent_y), new_transformed_grid, game_state['coins'])
+                state = (
+                    int(agent_x), int(agent_y), 0, int(closest_coin[0]), 
+                    int(closest_coin[1]), direction_feature, dist_to_closest_coint,
+                    up, right, down,left
+                )
         elif game_state['self'][2] and crate_exists(field):
             state, path = get_state_for_bomb_drop(self, (agent_x, agent_y), new_transformed_grid, game_state['coins'])
     elif game_state['self'][2] and crate_exists(field):
@@ -125,7 +166,12 @@ def get_state(self, game_state):
     else:
         up, right, down, left = get_adjacent_states(self, (agent_x, agent_y), new_transformed_grid, game_state['coins'])
         path = (agent_x, agent_y)
-        state = (4, 0, 0, up, right, down, left)
+        direction_feature = get_direction(agent_x, agent_y, path)
+        state = (
+            int(agent_x), int(agent_y), 3, int(agent_x), int(agent_y), 
+            direction_feature, dist_to_closest_coint,
+            up, right, down, left
+        )
     if state and path:
         next_step = tuple(path)
         if next_step == (agent_x, agent_y):
@@ -249,7 +295,7 @@ def get_danger_state_feature(self, agent_pos, new_transformed_grid, coins, bombs
     best_safe_option_closest_coin_distance = None
 
     converted_orig_grid = convert_original(orig_field)
-    danger_bomb, distance_to_bomb = find_danger_causing_bomb(self, (agent_x, agent_y), bombs, converted_orig_grid)
+    danger_bomb, timer = find_danger_causing_bomb(self, (agent_x, agent_y), bombs, converted_orig_grid)
     if new_transformed_grid[agent_x][agent_y] == -3 and len(self.all_actions) > 1:
         last_action = get_action_before_last_bomb_dropped(self, self.all_actions)
         action = get_opposite_action(self.all_actions[-2])
@@ -259,11 +305,11 @@ def get_danger_state_feature(self, agent_pos, new_transformed_grid, coins, bombs
         safe_options = get_safe_all_node_options(self, agent_pos, converted_orig_grid, new_transformed_grid, danger_bomb)
 
     if not safe_options:
-        if danger_bomb and distance_to_bomb:
-            direction = get_direction(agent_x, agent_y, danger_bomb)
-            state_feature = (1, direction, distance_to_bomb, up, right, down, left)
+        direction = get_direction(agent_x, agent_y, (agent_x, agent_y))
+        if danger_bomb:
+            state_feature = (int(agent_x), int(agent_y), 1, int(danger_bomb[0]), int(danger_bomb[1]), direction, timer, up, right, down, left)
         else:
-            state_feature = (1, None, None, up, right, down, left)
+            state_feature = (int(agent_x), int(agent_y), 1, None, None, direction, timer, up, right, down, left)
         path = (agent_x, agent_y)
         return state_feature, path
     
@@ -283,17 +329,17 @@ def get_danger_state_feature(self, agent_pos, new_transformed_grid, coins, bombs
         coin_x = best_safe_option_xy[0]
         coin_y = best_safe_option_xy[1]
         distance_to_coin = best_safe_option_closest_coin_distance
-        direction = get_direction(agent_x, agent_y, best_safe_option_closest_coin)
+        direction = get_direction(agent_x, agent_y, best_safe_option_xy)
         # coin state feature
-        state_feature  = (3, direction, distance_to_coin, up, right, down, left)
+        state_feature  = (int(agent_x), int(agent_y), 2, int(coin_x), int(coin_y), direction, distance_to_coin, up, right, down, left)
         path = best_safe_option_xy
     else:
+        direction = get_direction(agent_x, agent_y, best_safe_option_xy)
         # bomb state feature
         if danger_bomb:
-            direction = get_direction(agent_x, agent_y, danger_bomb)
-            state_feature = (1, direction, distance_to_bomb, up, right, down, left)
+            state_feature = (int(agent_x), int(agent_y), 1, int(danger_bomb[0]), int(danger_bomb[1]), direction, timer, up, right, down, left)
         else:
-            state_feature = (1, None, None, up, right, down, left)
+            state_feature = (int(agent_x), int(agent_y), 1, danger_bomb, danger_bomb, direction, timer, up, right, down, left)
         path = best_safe_option_xy
     
     return state_feature, path
@@ -458,17 +504,18 @@ def get_closest_coin_from(self, x, y, coins, grid):
     return (closest_coin, closest_path, closest_distance)
 
 def find_danger_causing_bomb(self, agent_pos, bombs, grid):
-    bomb_closest = None
+    bomb_closest, timer = None, None
     max_distance = len(grid) * len(grid)
     
     for bomb in bombs:
-        bomb_pos, _ = bomb
+        bomb_pos, t = bomb
         path = find_path_to_nearest_coin(self, grid, agent_pos, bomb_pos)
         if path and len(path) < max_distance:
             max_distance = len(path)
             bomb_closest = bomb_pos
+            timer = t
     
-    return (bomb_closest, max_distance)
+    return (bomb_closest, timer)
 
 def crate_exists(field):
     exists = False
@@ -590,17 +637,15 @@ def get_state_for_bomb_drop(self, agent_pos, grid, coins):
         state = None
         final_path = None
     elif distance_to_crate == 1 and crate_to_go_pos and path_to_crate:
-        direction = get_direction(agent_pos[0], agent_pos[1], crate_aimed)
-        state = (5, direction, distance_to_crate, up, right, down, left)
+        direction = 5
+        state = (int(agent_pos[0]), int(agent_pos[1]), 4, int(crate_aimed[0]), int(crate_aimed[1]), direction, max_crates_in_line, up, right, down, left)
         final_path = None
     elif 1 < distance_to_crate < len(grid) * len(grid) and crate_to_go_pos and path_to_crate:
         direction = get_direction(agent_pos[0], agent_pos[1], path_to_crate[1])
-        state = (2, direction, distance_to_crate, up, right, down, left)
+        state = (int(agent_pos[0]), int(agent_pos[1]), 5, crate_aimed[0], crate_aimed[1], direction, max_crates_in_line, up, right, down, left)
         final_path = path_to_crate[1]
     else:
         state = None
         final_path = None
     
     return (state, final_path)
-
-
